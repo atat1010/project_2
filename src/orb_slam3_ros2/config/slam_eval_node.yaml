@@ -1,0 +1,18 @@
+slam_eval_node:
+  ros__parameters:
+    est_pose_topic: "/orb_slam3/camera_pose"
+    gt_source: "tf"
+    gt_tf_topic: "/tf"
+    gt_parent_frame: "/world"
+    gt_child_frame: "/kinect"
+    time_tolerance: 0.02
+    sync_mode: "interp"
+    strict_sync: true
+    max_interp_gap: 0.05
+    min_matches_for_metrics: 20
+    report_interval_sec: 1.0
+    publish_paths: true
+    publish_synced_pose: true
+    publish_aligned_path: true
+    align_window_size: 200
+    min_matches_for_align: 20

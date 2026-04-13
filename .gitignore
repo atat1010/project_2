@@ -1,0 +1,24 @@
+# === ROS 2 编译与日志文件 ===
+build/
+install/
+log/
+
+# === Python 虚拟环境与缓存 ===
+.venv/
+__pycache__/
+*.pyc
+
+# === IDE 配置文件 ===
+.vscode/
+.idea/
+
+# === 大体积数据文件 ===
+*.pcd
+*.db3
+*.bag
+*.tar.gz
+
+src/ros2bag/
+src/weights/
+src/YOLOv8-ORB-SLAM3
+
