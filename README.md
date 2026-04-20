@@ -32,9 +32,9 @@
 
 ## 核心亮点 (Why this project stands out?)
 
--  **极低的算力与带宽消耗**：彻底摒弃传递点云或体素给大模型的传统方案，依靠高精 AABB JSON 拓扑，使端云通信带宽下降 90% 以上，极度适配边缘算力平台。
--  **跨越“断电”的长时记忆**：底层 C++ 维持 RAM 级高频状态机，上层 Python 建立跨帧字典索引，即使物体移出相机视野，机器人依然“记得”它在全局坐标系中的绝对位置。
--  **极其精准的自然语言交互**：完美支持多重约束指令查找（如：*“去最远的那把椅子”*、*“去地上那个水瓶”*），大模型自主完成空间比对。
+- **极低的算力与带宽消耗**：彻底摒弃传递点云或体素给大模型的传统方案，依靠高精 AABB JSON 拓扑，使端云通信带宽下降 90% 以上，极度适配边缘算力平台。
+- **跨越“断电”的长时记忆**：底层 C++ 维持 RAM 级高频状态机，上层 Python 建立跨帧字典索引，即使物体移出相机视野，机器人依然“记得”它在全局坐标系中的绝对位置。
+- **极其精准的自然语言交互**：完美支持多重约束指令查找（如：*“去最远的那把椅子”*、*“去地上那个水瓶”*），大模型自主完成空间比对。
 
 ---
 
@@ -43,26 +43,31 @@
 本项目涉及跨语言（C++/Python）与异构计算，为保证系统顺利编译运行，请确保您的环境满足以下依赖：
 
 #### 1. 操作系统与基础中间件
+
 * **OS**: Ubuntu 22.04 LTS
 * **ROS 2**: Humble Hawksbill (需安装 `ros-humble-desktop`)
 * **Build Tools**: CMake (>= 3.16) 与支持 C++17 的编译器 (GCC/G++ >= 9.0)
 
 #### 2. 视觉感知与深度学习 (2D Vision & AI)
+
 * **OpenCV**: 4.x (用于基础图像处理与 2D 连通域计算)
 * **Ultralytics YOLOv8**: 用于高频像素级语义分割与目标检测
 * **CUDA & cuDNN**: (强烈推荐) 用于 YOLOv8 模型推理的 GPU 硬件加速
 
 #### 3. 空间几何与 SLAM 后端 (3D Geometry & SLAM)
+
 * **ORB-SLAM3**: 用于提供高精度的相机位姿（$t_{wc}$）与全局参考系
 * **PCL (Point Cloud Library)**: 1.12+ (用于 3D 点云数据结构的过滤、存储与包围盒计算)
 * **Eigen3**: 3.3+ (底层数学库，ORB-SLAM3 与 PCL 的前置刚需依赖，用于高频矩阵运算)
 
 #### 4. 认知中枢与大模型接口 (Cognitive Brain)
+
 * **Python**: 3.8+ 
 * **ROS 2 Bridge**: `cv_bridge` (用于实现 ROS Image 消息与 OpenCV/NumPy 阵列的无缝转换)
 * **LLM SDK**: `openai` (用于兼容所有标准 OpenAI API 格式的大语言模型服务)
 
 ### 编译构建
+
 ```bash
 mkdir -p ~/semantic_slam_ws/src
 cd ~/semantic_slam_ws/src
@@ -71,7 +76,25 @@ cd ..
 colcon build --symlink-install
 source install/setup.bash
 ```
+
+### VLM交互
+
+```bash
+ros2 topic pub --once /vlm/prompt std_msgs/msg/String "{data: 'your_msg'}"
+```
+
+本项目支持任何兼容 OpenAI 接口的大模型（推荐使用 Qwen 等多模态模型）：
+
+```bash
+export DASHSCOPE_API_KEY="your_api_key_here"
+```
+
+同时修改`vlm_brain_node.py`中的`model_name`变量以指定使用的模型。
+
 ### 运行
+
 ```bash
 ros2 launch orb_slam3_ros2 semantic_slam.launch.py
 ```
+
+
