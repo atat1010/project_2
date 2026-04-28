@@ -45,6 +45,34 @@ inline void LabelToBGR(const uint8_t label, uint8_t &b, uint8_t &g, uint8_t &r) 
   g = static_cast<uint8_t>((17U * label + 101U) % 256U);
   r = static_cast<uint8_t>((29U * label + 197U) % 256U);
 }
+
+inline float IoU2DXY(const Eigen::Vector3f &a_min, const Eigen::Vector3f &a_max,
+                     const Eigen::Vector3f &b_min, const Eigen::Vector3f &b_max) {
+  const float ax0 = std::min(a_min.x(), a_max.x());
+  const float ax1 = std::max(a_min.x(), a_max.x());
+  const float ay0 = std::min(a_min.y(), a_max.y());
+  const float ay1 = std::max(a_min.y(), a_max.y());
+
+  const float bx0 = std::min(b_min.x(), b_max.x());
+  const float bx1 = std::max(b_min.x(), b_max.x());
+  const float by0 = std::min(b_min.y(), b_max.y());
+  const float by1 = std::max(b_min.y(), b_max.y());
+
+  const float ix0 = std::max(ax0, bx0);
+  const float ix1 = std::min(ax1, bx1);
+  const float iy0 = std::max(ay0, by0);
+  const float iy1 = std::min(ay1, by1);
+
+  const float iw = std::max(0.0f, ix1 - ix0);
+  const float ih = std::max(0.0f, iy1 - iy0);
+  const float inter = iw * ih;
+
+  const float a_area = std::max(0.0f, ax1 - ax0) * std::max(0.0f, ay1 - ay0);
+  const float b_area = std::max(0.0f, bx1 - bx0) * std::max(0.0f, by1 - by0);
+  const float uni = a_area + b_area - inter;
+  if (uni <= 1e-9f) return 0.0f;
+  return inter / uni;
+}
 }  // namespace
 
 class SemanticPointCloudBuilder : public rclcpp::Node {
@@ -361,6 +389,9 @@ private:
           inst.miss_count++;
       }
 
+      // 本帧一一匹配：防止多个临时实例抢同一个全局实例，导致近距离同类被合并。
+      std::unordered_set<int> matched_global_ids;
+
       for (const auto &kv : instance_points) {
         int temp_inst_id = kv.first;
         const auto &pts = kv.second;
@@ -386,30 +417,45 @@ private:
         uint32_t curr_sem = 0;
         if (instance_semantic_class.count(temp_inst_id)) curr_sem = instance_semantic_class[temp_inst_id];
 
-        // 2. 去备忘录里找老熟人 (距离 < 0.5米 且 语义相同)
+        // 2. 去备忘录里找老熟人 (同类 + 距离门控)。
+        // 最小侵入式增强：
+        // - 选“最优匹配”而不是“遇到第一个就 break”（避免顺序依赖）
+        // - 本帧一一匹配（避免近距离同类被合并到同一全局实例）
+        // - 加一个轻量 IoU(XY) 门控，降低“同类但不同物体距离很近”的误合并
         bool matched = false;
-        const float DISTANCE_THRESHOLD = 0.5f; 
+        const float DISTANCE_THRESHOLD = 0.5f;
+        const float VERY_CLOSE_DIST = 0.20f;   // 超近距离：允许绕过 IoU 门控，兼容原本行为
+        const float MIN_IOU_XY = 0.05f;        // 低阈值：只做“反误合并”而不改变常规场景
 
-        for (auto &global_inst : global_instances_) {
-          if (global_inst.semantic_id == curr_sem) {
-            float dist = (global_inst.centroid - curr_centroid).norm();
-            if (dist < DISTANCE_THRESHOLD) {
-              // 匹配成功：平滑更新质心，取最大的包围盒
-              global_inst.centroid = 0.8f * global_inst.centroid + 0.2f * curr_centroid;
+        int best_idx = -1;
+        float best_dist = std::numeric_limits<float>::infinity();
 
-              // global_inst.aabb_min = global_inst.aabb_min.cwiseMin(curr_min);
-              // global_inst.aabb_max = global_inst.aabb_max.cwiseMax(curr_max);
+        for (int gi = 0; gi < static_cast<int>(global_instances_.size()); ++gi) {
+          auto &global_inst = global_instances_[gi];
+          if (global_inst.semantic_id != curr_sem) continue;
+          if (matched_global_ids.count(global_inst.id) > 0) continue;
 
-              // AABB 的正确更新方式：卡尔曼滤波思想 (EMA平滑)，而不是无限取极值！
-              // 这允许包围盒在噪声消失后【自动收缩】回真实的物理尺寸
-              global_inst.aabb_min = 0.8f * global_inst.aabb_min + 0.2f * curr_min;
-              global_inst.aabb_max = 0.8f * global_inst.aabb_max + 0.2f * curr_max;
-              global_inst.hit_count++;
-              global_inst.miss_count = 0; // <--- 【新增】看到了就清零，续命成功！
-              matched = true;
-              break;
-            }
+          const float dist = (global_inst.centroid - curr_centroid).norm();
+          if (dist >= DISTANCE_THRESHOLD) continue;
+
+          const float iou_xy = IoU2DXY(global_inst.aabb_min, global_inst.aabb_max, curr_min, curr_max);
+          if (!(dist < VERY_CLOSE_DIST || iou_xy >= MIN_IOU_XY)) continue;
+
+          if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = gi;
           }
+        }
+
+        if (best_idx >= 0) {
+          auto &global_inst = global_instances_[best_idx];
+          global_inst.centroid = 0.8f * global_inst.centroid + 0.2f * curr_centroid;
+          global_inst.aabb_min = 0.8f * global_inst.aabb_min + 0.2f * curr_min;
+          global_inst.aabb_max = 0.8f * global_inst.aabb_max + 0.2f * curr_max;
+          global_inst.hit_count++;
+          global_inst.miss_count = 0;
+          matched_global_ids.insert(global_inst.id);
+          matched = true;
         }
 
         // 3. 没找到，说明是新物体，登记入库
